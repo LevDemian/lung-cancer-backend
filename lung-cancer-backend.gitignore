@@ -1,7 +1,6 @@
 __pycache__/
 *.pyc
 *.pkl
-*.pth
 *.log
 *.DS_Store
 .env
