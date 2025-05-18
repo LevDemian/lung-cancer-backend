@@ -10,7 +10,8 @@ from PIL import Image
 
 # Загружаем модель
 model = UNet(in_channels=3)
-model.load_state_dict(torch.load("../model/model.pth", map_location=torch.device('cpu')))
+model_path = os.path.join(os.path.dirname(__file__), '..', 'model', 'model.pth')
+model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
 model.eval()
 
 transform = transforms.Compose([
