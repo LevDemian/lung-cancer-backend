@@ -1,66 +1,77 @@
-from flask import Flask, request, jsonify
+import streamlit as st
+import pandas as pd
+from datetime import datetime
 import os
-from werkzeug.utils import secure_filename
-from utils import allowed_file, check_resolution
-from model_predict import analyze_image
-from flask_cors import CORS
+from model_predict import analyze_image  # <-- Подключаем модель
+from PIL import Image
+import tempfile
 
-app = Flask(__name__)
-CORS(app)
+# Настройка страницы
+st.set_page_config(page_title="Диагностика рака лёгких", layout="wide")
 
-UPLOAD_FOLDER = '../data/uploads'
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 20 MB
+# Стиль (бело-голубая тема)
+st.markdown("""
+    <style>
+    .main { background-color: #f0f9ff; }
+    .sidebar .sidebar-content { background-color: #e6f2ff; }
+    h1 { color: #0068c9; }
+    </style>
+    """, unsafe_allow_html=True)
 
-@app.route('/upload', methods=['POST'])
-def upload():
-    if 'file' not in request.files:
-        return jsonify({'error': 'Нет файла с именем file'}), 400
+# Заголовок
+st.title("Медицинская диагностика рака лёгких")
 
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'Файл не выбран'}), 400
+# Форма ввода данных
+with st.form("patient_data"):
+    st.header("Данные пациента")
+    col1, col2 = st.columns(2)
+    with col1:
+        last_name = st.text_input("Фамилия")
+        first_name = st.text_input("Имя")
+        middle_name = st.text_input("Отчество")
+    with col2:
+        birth_date = st.date_input("Дата рождения", datetime.now())
+        snils = st.text_input("СНИЛС")
+    anamnesis = st.text_area("Анамнез")
+    submit_patient = st.form_submit_button("Сохранить данные")
 
-    if not allowed_file(file.filename):
-        return jsonify({'error': 'Недопустимый формат файла'}), 400
+# Загрузка изображений и вызов модели
+st.header("Анализ снимков")
+uploaded_file = st.file_uploader("Загрузите МРТ/КТ/рентген", type=["jpg", "png"])
 
-    filename = secure_filename(file.filename)
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    file.save(filepath)
+if uploaded_file:
+    st.image(uploaded_file, caption="Загруженный снимок", width=300)
 
-    if not check_resolution(filepath):
-        os.remove(filepath)
-        return jsonify({'error': 'Низкое разрешение изображения'}), 400
+    # Сохраняем изображение во временный файл
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_file:
+        tmp_file.write(uploaded_file.read())
+        tmp_path = tmp_file.name
 
-    return jsonify({'message': 'Файл успешно загружен', 'filename': filename}), 200
+    # Вызываем модель
+    try:
+        prediction = analyze_image(tmp_path)
+        st.success(f"Результат анализа: {prediction}")
+    except Exception as e:
+        st.error(f"Ошибка при анализе изображения: {e}")
 
-@app.route('/analyze', methods=['POST'])
-def analyze():
-    data = request.get_json()
-    filename = data.get('filename')
-    if not filename:
-        return jsonify({'error': 'Не указано имя файла'}), 400
-
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    if not os.path.exists(filepath):
-        return jsonify({'error': 'Файл не найден'}), 404
-
-    result = analyze_image(filepath)
-    return jsonify(result), 200
-
-@app.route('/export', methods=['GET'])
-def export_csv():
-    import pandas as pd
-    data = [
-        {"patient_id": 1, "age": 45, "gender": "M", "risk_level": "high"},
-        {"patient_id": 2, "age": 60, "gender": "F", "risk_level": "low"},
-    ]
+# Сохранение данных пациента
+if submit_patient and last_name and first_name:
+    data = {
+        "Фамилия": [last_name],
+        "Имя": [first_name],
+        "Отчество": [middle_name],
+        "Дата рождения": [birth_date],
+        "СНИЛС": [snils],
+        "Анамнез": [anamnesis],
+        "Дата записи": [datetime.now()]
+    }
     df = pd.DataFrame(data)
-    csv_path = "../data/csv/patient_export.csv"
-    df.to_csv(csv_path, index=False)
-    return jsonify({"message": "Экспорт завершён", "file": csv_path})
 
-if __name__ == '__main__':
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    if not os.path.exists("patients.csv"):
+        df.to_csv("patients.csv", index=False)
+    else:
+        existing_df = pd.read_csv("patients.csv")
+        updated_df = pd.concat([existing_df, df], ignore_index=True)
+        updated_df.to_csv("patients.csv", index=False)
+
+    st.success("Данные пациента сохранены!")
